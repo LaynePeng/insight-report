@@ -1,0 +1,63 @@
+# LLM API配置
+llm:
+  base_url: "https://api.siliconflow.cn/v1"  # LLM API 地址
+  api_key: ""  # 填入你的API Key, 或通过 --api-key 参数、LLM_API_KEY 环境变量提供
+  model: "deepseek-ai/DeepSeek-V3" # 使用的模型
+  max_chars: 15000  # 字幕分块处理的单块最大字符数，以避免超出模型上下文限制
+
+# 提示词配置
+prompts:
+  system_prompt: "你是一名专业的技术分析师，擅长从YouTube技术视频中提取关键洞察并生成结构化的中文报告。"
+  
+  # 用于最终报告生成的提示词
+  analysis_prompt: |
+    请基于以下字幕内容（或字幕摘要），生成一份详尽的技术洞察报告。
+    报告应包含：
+    1. **议题信息**：包括议题名称，链接，演讲人
+    2. **洞察观点**：对发布内容的分析和解决，对华为云规划的输入和建议。内容如：
+       - 友商 xx 大会发布 xxx 产品/xxx 特性/xxx 方案等
+       - 我们的看法和建议
+       - 我们是领先、落后？
+       - 我们有什么启示？
+    3. **洞察内容与分析**： 
+        - 发布内容介绍
+        - 新产品/新特性/新方案的技术细节
+        - 场景和客户
+        - 价值
+        - 关键指标
+    
+    请使用Markdown格式，确保报告结构清晰、内容专业。
+
+    字幕内容：
+    {transcript}
+
+  # 用于长字幕分块总结的提示词
+  summary_prompt: |
+    请高度浓缩以下字幕片段的核心要点，总结应简明扼要，保留关键术语和信息，用于后续的整合分析。
+
+    字幕片段：
+    {transcript}
+
+# 字幕处理配置
+subtitle:
+  # yt-dlp 将按此顺序尝试下载字幕
+  preferred_languages: ['zh-Hans', 'zh-CN', 'zh', 'en']
+  
+  # --- 访问需要登录的视频 (二选一) ---
+  
+  # (推荐) 方法1: 自动从浏览器读取Cookies
+  # 只需在此处填入你的浏览器名称 (小写)
+  # 支持: chrome, firefox, opera, edge, safari, vivaldi, brave
+  # 程序会优先使用此方法。
+  browser_for_cookies: "chrome" # 例如: "chrome"
+
+  # (备用) 方法2: 使用cookies.txt文件
+  # 如果不想用方法1, 可将浏览器cookies导出为 'cookies.txt' 文件并在此处提供路径
+  # 例如使用 'Get cookies.txt' 等浏览器插件
+  cookies_file: "" # 例如: "/path/to/your/cookies.txt"
+
+# 输出配置
+output:
+  reports_dir: "reports"      # 保存报告和字幕的目录
+  save_subtitles: true        # 是否同时保存原始字幕文件
+  format: "md"                # 生成报告的格式 (例如: md, txt)
