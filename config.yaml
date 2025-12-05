@@ -2,7 +2,7 @@
 llm:
   base_url: "https://api.siliconflow.cn/v1"  # LLM API 地址
   api_key: ""  # 填入你的API Key, 或通过 --api-key 参数、LLM_API_KEY 环境变量提供
-  model: "deepseek-ai/DeepSeek-V3" # 使用的模型
+  model: "MiniMaxAI/MiniMax-M2" # 使用的模型
   max_chars: 15000  # 字幕分块处理的单块最大字符数，以避免超出模型上下文限制
 
 # 提示词配置
