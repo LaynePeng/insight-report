@@ -212,38 +212,71 @@ output:
         summaries = []
 
         for i, chunk in enumerate(chunks):
-            print(f"正在处理分块 {i+1}/{len(chunks)}...")
-            summary = self._generate_report_for_chunk(chunk, is_summary=True)
+            summary_path = self.temp_dir / f"chunk_{i+1}_summary.txt"
+            
+            if summary_path.exists():
+                print(f"分块 {i+1}/{len(chunks)} 的摘要已存在，从缓存加载...")
+                with open(summary_path, 'r', encoding='utf-8') as f:
+                    summary = f.read()
+            else:
+                print(f"正在处理分块 {i+1}/{len(chunks)}...")
+                summary = self._generate_report_for_chunk(chunk, is_summary=True)
+                with open(summary_path, 'w', encoding='utf-8') as f:
+                    f.write(summary)
+                print(f"分块 {i+1} 总结完成，并已缓存。")
+            
             summaries.append(summary)
-            print(f"分块 {i+1} 总结完成。")
 
         print("所有分块总结完毕，正在进行最终整合分析...")
         combined_summary = "\n\n".join(summaries)
         
-        # 保存整合后的摘要，便于调试
-        self._save_text("combined_summary", combined_summary, suffix="_summary.txt")
-
+        # 保存整合后的摘要到临时目录，便于调试
+        combined_summary_path = self.temp_dir / "combined_summary.txt"
+        with open(combined_summary_path, 'w', encoding='utf-8') as f:
+            f.write(combined_summary)
+        
         final_report = self._generate_report_for_chunk(combined_summary, is_summary=False)
         return final_report
 
+    def _get_video_id(self, video_url: str) -> str:
+        """从URL中提取视频ID"""
+        match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', video_url)
+        if not match:
+            raise ValueError("无法从URL中提取有效的YouTube视频ID")
+        return match.group(1)
+
     def run(self, video_url: str):
         """执行主分析流程"""
-        print(f"=== 开始分析视频: {video_url} ===")
         try:
-            transcript = self._extract_subtitle(video_url)
-            print(f"字幕提取成功，长度: {len(transcript)} 字符。")
+            self.video_id = self._get_video_id(video_url)
+            self.temp_dir = self.reports_dir / "temp" / self.video_id
+            self.temp_dir.mkdir(parents=True, exist_ok=True)
             
-            if self.config.get('output', {}).get('save_subtitles'):
-                self._save_text(video_url, transcript, suffix="_raw_transcript.txt")
+            print(f"=== 开始分析视频: {video_url} (ID: {self.video_id}) ===")
+            
+            transcript_path = self.temp_dir / "transcript.txt"
+
+            if transcript_path.exists():
+                print("从缓存加载字幕...")
+                with open(transcript_path, 'r', encoding='utf-8') as f:
+                    transcript = f.read()
+            else:
+                transcript = self._extract_subtitle(video_url)
+                with open(transcript_path, 'w', encoding='utf-8') as f:
+                    f.write(transcript)
+            
+            print(f"字幕处理完成，长度: {len(transcript)} 字符。")
 
             report = self._process_long_transcript(transcript)
             
             report_format = self.config.get('output', {}).get('format', 'md')
-            report_path = self._save_text(video_url, report, suffix=f"_report.{report_format}")
+            # 最终报告保存到主目录
+            report_path = self._save_text(self.video_id, report, suffix=f"_report.{report_format}", use_temp_dir=False)
             
             print("\n" + "="*30)
             print("✅ 报告生成成功！")
             print(f"📄 文件路径: {report_path}")
+            print(f"ℹ️  中间文件保存在: {self.temp_dir}")
             print("="*30 + "\n")
             print("--- 报告预览 ---")
             print(report[:400] + "..." if len(report) > 400 else report)
@@ -251,16 +284,18 @@ output:
         except (RuntimeError, ValueError) as e:
             print(f"\n❌ 任务失败: {e}")
 
-    def _save_text(self, identifier: str, content: str, suffix: str) -> Path:
+    def _save_text(self, identifier: str, content: str, suffix: str, use_temp_dir: bool = False) -> Path:
         """保存文本内容到文件"""
-        if "http" in identifier:
-            match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', identifier)
-            video_id = match.group(1) if match else "unknown_video"
-        else:
-            video_id = identifier
-            
+        video_id = self._get_video_id(identifier) if "http" in identifier else identifier
+                    
         filename = f"{video_id}{suffix}"
-        path = self.reports_dir / filename
+        
+        if use_temp_dir:
+            base_dir = self.temp_dir
+        else:
+            base_dir = self.reports_dir
+        
+        path = base_dir / filename
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
         return path
