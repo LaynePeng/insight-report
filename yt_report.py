@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-YouTube技术洞察报告生成器 (重构版)
+YouTube技术洞察报告生成器
 从YouTube视频提取字幕并使用LLM生成技术分析报告。
 支持长字幕自动分块处理。
 """
@@ -14,87 +14,68 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv
 
-class YouTubeAnalyzer:
-    """
-    主分析器类，整合了配置加载、字幕提取、LLM分析和文件保存功能。
-    """
+# 加载环境变量
+load_dotenv()
 
-    DEFAULT_CONFIG = """
-llm:
-  base_url: "https://api.openai.com/v1"
-  api_key: ""
-  model: "gpt-3.5-turbo"
-  max_chars: 15000  # 字幕分块处理的单块最大字符数
-
-prompts:
-  system_prompt: "你是一名专业的技术分析师，擅长从技术视频内容中提取关键洞察。"
-  analysis_prompt: |
-    请分析以下视频字幕内容，生成一份技术洞察报告。
-    报告应包含核心技术概念、关键要点总结、实践应用建议等。
-    请使用清晰、专业的中文输出。
-
-    字幕内容：
-    {transcript}
-  
-  summary_prompt: |
-    请总结以下字幕的核心内容，用于后续的整合分析。
-    总结应简明扼要，突出关键信息。
-
-    字幕内容：
-    {transcript}
-
-subtitle:
-  preferred_languages: ['zh-Hans', 'zh-CN', 'zh', 'en']
-
-output:
-  reports_dir: "reports"
-  save_subtitles: true
-  format: "md"
-"""
-
-    def __init__(self, config_path: str = "config.yaml", api_key: Optional[str] = None):
+class ConfigLoader:
+    """配置加载器，负责加载和验证配置文件"""
+    def __init__(self, config_path: str = "config.yaml"):
         self.config_path = config_path
-        self.config = self._load_or_create_config()
-        
-        # API Key 优先级: 命令行参数 > 环境变量 > 配置文件
-        self.api_key = api_key or os.getenv("LLM_API_KEY") or self.config.get('llm', {}).get('api_key')
-        
-        if not self.api_key or "YOUR_API_KEY" in self.api_key:
-            self.api_key = input("请输入你的LLM API Key: ").strip()
-            if not self.api_key:
-                print("错误: 未提供有效的API Key。")
-                sys.exit(1)
 
-        self.reports_dir = Path(self.config.get('output', {}).get('reports_dir', 'reports'))
-        self.reports_dir.mkdir(exist_ok=True)
-
-    def _load_or_create_config(self) -> Dict[str, Any]:
-        """加载或创建配置文件"""
+    def load_config(self) -> Dict[str, Any]:
+        """加载配置文件"""
         if not os.path.exists(self.config_path):
-            print(f"配置文件 {self.config_path} 不存在，创建默认模板...")
-            try:
-                with open(self.config_path, 'w', encoding='utf-8') as f:
-                    f.write(self.DEFAULT_CONFIG)
-                print(f"默认配置已创建，你可以在 {self.config_path} 中修改。")
-            except IOError as e:
-                print(f"无法创建配置文件: {e}")
-                sys.exit(1)
+            print(f"❌ 错误: 配置文件 {self.config_path} 不存在ảng")
+            print("请确保目录下存在正确的 config.yaml 文件ảng")
+            sys.exit(1)
         
         try:
             with open(self.config_path, 'r', encoding='utf-8') as file:
-                return yaml.safe_load(file) or {}
+                config = yaml.safe_load(file) or {}
+                return config
         except yaml.YAMLError as e:
-            print(f"配置文件格式错误: {e}")
+            print(f"❌ 配置文件格式错误: {e}")
             sys.exit(1)
 
-    def _extract_subtitle(self, video_url: str) -> str:
+class CacheManager:
+    """缓存管理器，负责文件读写和临时目录管理"""
+    def __init__(self, reports_dir: str):
+        self.reports_dir = Path(reports_dir)
+        self.reports_dir.mkdir(parents=True, exist_ok=True)
+
+    def get_temp_dir(self, video_id: str) -> Path:
+        """获取特定视频的临时目录"""
+        temp_dir = self.reports_dir / "temp" / video_id
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return temp_dir
+
+    def save_text(self, path: Path, content: str):
+        """保存文本到文件"""
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def load_text(self, path: Path) -> str:
+        """从文件加载文本"""
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    def exists(self, path: Path) -> bool:
+        """检查文件是否存在"""
+        return path.exists()
+
+class SubtitleService:
+    """字幕服务，负责提取和清洗字幕"""
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config.get('subtitle', {})
+
+    def extract_subtitle(self, video_url: str) -> str:
         """使用 yt-dlp 提取字幕"""
         temp_prefix = f"temp_sub_{int(time.time())}"
-        subtitle_config = self.config.get('subtitle', {})
-        preferred_languages = subtitle_config.get('preferred_languages', ['en'])
-        browser_for_cookies = subtitle_config.get('browser_for_cookies')
-        cookies_file = subtitle_config.get('cookies_file')
+        preferred_languages = self.config.get('preferred_languages', ['en'])
+        browser_for_cookies = self.config.get('browser_for_cookies')
+        cookies_file = self.config.get('cookies_file')
         
         ydl_opts: Dict[str, Any] = {
             'skip_download': True,
@@ -105,11 +86,10 @@ output:
             'outtmpl': temp_prefix,
             'quiet': True,
             'no_warnings': True,
-            'no_check_certificate': True, # 解决 SSL 证书问题
+            'no_check_certificate': True,
         }
 
         # --- Cookie 配置 ---
-        # 优先使用 browser_for_cookies
         if browser_for_cookies:
             print(f"尝试从浏览器 '{browser_for_cookies}' 自动加载 cookies...")
             ydl_opts['cookiesfrombrowser'] = (browser_for_cookies, )
@@ -123,13 +103,14 @@ output:
                 print("正在获取视频信息并下载字幕...")
                 ydl.extract_info(video_url, download=True)
                 
+                # 查找下载的文件
                 for file in os.listdir('.'):
                     if file.startswith(temp_prefix) and file.endswith('.vtt'):
                         downloaded_file = file
                         break
                 
                 if not downloaded_file:
-                    raise ValueError("未找到可下载的字幕文件。")
+                    raise ValueError("未找到可下载的字幕文件ảng")
 
                 with open(downloaded_file, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -142,7 +123,7 @@ output:
                 os.remove(downloaded_file)
 
     def _clean_vtt_text(self, vtt_text: str) -> str:
-        """清理 VTT 字幕格式"""
+        """清洗 VTT 字幕格式"""
         lines = vtt_text.splitlines()
         cleaned_lines = []
         seen_lines = set()
@@ -158,18 +139,22 @@ output:
                 seen_lines.add(line)
         return "\n".join(cleaned_lines)
 
-    def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """调用LLM API"""
-        llm_config = self.config.get('llm', {})
-        base_url = llm_config.get('base_url', '').rstrip('/')
-        model = llm_config.get('model')
+class LLMService:
+    """LLM 服务，负责与大模型 API 交互"""
+    def __init__(self, config: Dict[str, Any], api_key: str):
+        self.config = config.get('llm', {})
+        self.api_key = api_key
+        self.base_url = self.config.get('base_url', '').rstrip('/')
+        self.model = self.config.get('model')
 
+    def call_llm(self, system_prompt: str, user_prompt: str) -> str:
+        """调用 LLM API"""
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
         }
         data = {
-            "model": model,
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -178,127 +163,123 @@ output:
         }
 
         try:
-            url = f"{base_url}/chat/completions"
+            url = f"{self.base_url}/chat/completions"
             response = requests.post(url, headers=headers, json=data, timeout=180)
             response.raise_for_status()
             result = response.json()
             return result['choices'][0]['message']['content'].strip()
         except requests.RequestException as e:
-            raise RuntimeError(f"API 请求失败: {e}, 响应: {e.response.text if e.response else 'N/A'}")
+            error_msg = f"API 请求失败: {e}"
+            if e.response is not None:
+                error_msg += f", 响应: {e.response.text}"
+            raise RuntimeError(error_msg)
+
+class YouTubeAnalyzer:
+    """主分析器，协调各个服务生成报告"""
+    def __init__(self, 
+                 config: Dict[str, Any], 
+                 subtitle_service: SubtitleService, 
+                 llm_service: LLMService, 
+                 cache_manager: CacheManager):
+        self.config = config
+        self.subtitle_service = subtitle_service
+        self.llm_service = llm_service
+        self.cache_manager = cache_manager
+        self.prompts_config = config.get('prompts', {})
+
+    def _get_video_id(self, video_url: str) -> str:
+        """从 URL 提取视频 ID"""
+        match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', video_url)
+        if not match:
+            raise ValueError("无法从 URL 中提取有效的 YouTube 视频 ID")
+        return match.group(1)
 
     def _generate_report_for_chunk(self, transcript_chunk: str, is_summary: bool) -> str:
         """为单个文本块生成报告或摘要"""
-        prompts_config = self.config.get('prompts', {})
-        system_prompt = prompts_config.get('system_prompt', '')
+        system_prompt = self.prompts_config.get('system_prompt', '')
         
         if is_summary:
-            prompt_template = prompts_config.get('summary_prompt', '{transcript}')
+            prompt_template = self.prompts_config.get('summary_prompt', '{transcript}')
         else:
-            prompt_template = prompts_config.get('analysis_prompt', '{transcript}')
+            prompt_template = self.prompts_config.get('analysis_prompt', '{transcript}')
             
         user_prompt = prompt_template.format(transcript=transcript_chunk)
-        return self._call_llm(system_prompt, user_prompt)
+        return self.llm_service.call_llm(system_prompt, user_prompt)
 
-    def _process_long_transcript(self, transcript: str) -> str:
-        """处理长字幕，分块总结再整合分析"""
+    def _process_long_transcript(self, transcript: str, temp_dir: Path) -> str:
+        """处理长字幕：分块 -> 总结 -> 整合分析"""
         max_chars = self.config.get('llm', {}).get('max_chars', 15000)
         
         if len(transcript) <= max_chars:
             print("字幕长度适中，直接生成报告...")
             return self._generate_report_for_chunk(transcript, is_summary=False)
 
-        print(f"字幕过长({len(transcript)} > {max_chars})，启动分块总结模式...")
+        print(f"字幕过长({len(transcript)} > {max_chars})，启动分块总结模式ảng")
         chunks = [transcript[i:i+max_chars] for i in range(0, len(transcript), max_chars)]
         summaries = []
 
         for i, chunk in enumerate(chunks):
-            summary_path = self.temp_dir / f"chunk_{i+1}_summary.txt"
+            summary_path = temp_dir / f"chunk_{i+1}_summary.txt"
             
-            if summary_path.exists():
+            if self.cache_manager.exists(summary_path):
                 print(f"分块 {i+1}/{len(chunks)} 的摘要已存在，从缓存加载...")
-                with open(summary_path, 'r', encoding='utf-8') as f:
-                    summary = f.read()
+                summary = self.cache_manager.load_text(summary_path)
             else:
                 print(f"正在处理分块 {i+1}/{len(chunks)}...")
                 summary = self._generate_report_for_chunk(chunk, is_summary=True)
-                with open(summary_path, 'w', encoding='utf-8') as f:
-                    f.write(summary)
-                print(f"分块 {i+1} 总结完成，并已缓存。")
+                self.cache_manager.save_text(summary_path, summary)
+                print(f"分块 {i+1} 总结完成，并已缓存ảng")
             
             summaries.append(summary)
 
         print("所有分块总结完毕，正在进行最终整合分析...")
         combined_summary = "\n\n".join(summaries)
         
-        # 保存整合后的摘要到临时目录，便于调试
-        combined_summary_path = self.temp_dir / "combined_summary.txt"
-        with open(combined_summary_path, 'w', encoding='utf-8') as f:
-            f.write(combined_summary)
+        # 保存整合后的摘要以便调试
+        combined_summary_path = temp_dir / "combined_summary.txt"
+        self.cache_manager.save_text(combined_summary_path, combined_summary)
         
         final_report = self._generate_report_for_chunk(combined_summary, is_summary=False)
         return final_report
 
-    def _get_video_id(self, video_url: str) -> str:
-        """从URL中提取视频ID"""
-        match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', video_url)
-        if not match:
-            raise ValueError("无法从URL中提取有效的YouTube视频ID")
-        return match.group(1)
-
     def run(self, video_url: str):
-        """执行主分析流程"""
+        """执行主流程"""
         try:
-            self.video_id = self._get_video_id(video_url)
-            self.temp_dir = self.reports_dir / "temp" / self.video_id
-            self.temp_dir.mkdir(parents=True, exist_ok=True)
+            video_id = self._get_video_id(video_url)
+            temp_dir = self.cache_manager.get_temp_dir(video_id)
             
-            print(f"=== 开始分析视频: {video_url} (ID: {self.video_id}) ===")
+            print(f"=== 开始分析视频: {video_url} (ID: {video_id}) ===")
             
-            transcript_path = self.temp_dir / "transcript.txt"
-
-            if transcript_path.exists():
+            # 1. 获取字幕
+            transcript_path = temp_dir / "transcript.txt"
+            if self.cache_manager.exists(transcript_path):
                 print("从缓存加载字幕...")
-                with open(transcript_path, 'r', encoding='utf-8') as f:
-                    transcript = f.read()
+                transcript = self.cache_manager.load_text(transcript_path)
             else:
-                transcript = self._extract_subtitle(video_url)
-                with open(transcript_path, 'w', encoding='utf-8') as f:
-                    f.write(transcript)
+                transcript = self.subtitle_service.extract_subtitle(video_url)
+                self.cache_manager.save_text(transcript_path, transcript)
             
-            print(f"字幕处理完成，长度: {len(transcript)} 字符。")
+            print(f"字幕处理完成，长度: {len(transcript)} 字符ảng")
 
-            report = self._process_long_transcript(transcript)
+            # 2. 生成报告
+            report = self._process_long_transcript(transcript, temp_dir)
             
+            # 3. 保存最终报告
             report_format = self.config.get('output', {}).get('format', 'md')
-            # 最终报告保存到主目录
-            report_path = self._save_text(self.video_id, report, suffix=f"_report.{report_format}", use_temp_dir=False)
+            report_filename = f"{video_id}_report.{report_format}"
+            report_path = self.cache_manager.reports_dir / report_filename
+            self.cache_manager.save_text(report_path, report)
             
             print("\n" + "="*30)
-            print("✅ 报告生成成功！")
+            print("✅ 报告生成成功ảng")
             print(f"📄 文件路径: {report_path}")
-            print(f"ℹ️  中间文件保存在: {self.temp_dir}")
+            print(f"ℹ️  中间文件保存在: {temp_dir}")
             print("="*30 + "\n")
             print("--- 报告预览 ---")
             print(report[:400] + "..." if len(report) > 400 else report)
 
         except (RuntimeError, ValueError) as e:
             print(f"\n❌ 任务失败: {e}")
-
-    def _save_text(self, identifier: str, content: str, suffix: str, use_temp_dir: bool = False) -> Path:
-        """保存文本内容到文件"""
-        video_id = self._get_video_id(identifier) if "http" in identifier else identifier
-                    
-        filename = f"{video_id}{suffix}"
-        
-        if use_temp_dir:
-            base_dir = self.temp_dir
-        else:
-            base_dir = self.reports_dir
-        
-        path = base_dir / filename
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        return path
 
 def main():
     import argparse
@@ -314,7 +295,25 @@ def main():
     )
     args = parser.parse_args()
 
-    analyzer = YouTubeAnalyzer(config_path=args.config, api_key=args.api_key)
+    # 1. 加载配置
+    config_loader = ConfigLoader(args.config)
+    config = config_loader.load_config()
+
+    # 2. 获取 API Key
+    api_key = args.api_key or os.getenv("LLM_API_KEY") or config.get('llm', {}).get('api_key')
+    if not api_key or "YOUR_API_KEY" in api_key:
+        api_key = input("请输入你的LLM API Key: ").strip()
+        if not api_key:
+            print("❌ 错误: 未提供有效的API Keyảng")
+            sys.exit(1)
+
+    # 3. 初始化服务
+    cache_manager = CacheManager(config.get('output', {}).get('reports_dir', 'reports'))
+    subtitle_service = SubtitleService(config)
+    llm_service = LLMService(config, api_key)
+
+    # 4. 运行分析器
+    analyzer = YouTubeAnalyzer(config, subtitle_service, llm_service, cache_manager)
     analyzer.run(args.url)
 
 if __name__ == "__main__":
