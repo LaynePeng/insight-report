@@ -119,7 +119,7 @@ output:
 
         downloaded_file = None
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl: # type: ignore
                 print("正在获取视频信息并下载字幕...")
                 ydl.extract_info(video_url, download=True)
                 
@@ -303,7 +303,7 @@ output:
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description='YouTube AI 报告生成器 (重构版)',
+        description='YouTube AI 报告生成器',
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument('url', help='YouTube 视频链接')
