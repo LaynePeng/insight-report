@@ -148,11 +148,38 @@ class LLMService:
     def __init__(self, config: Dict[str, Any], api_key: str):
         self.config = config.get('llm', {})
         self.api_key = api_key
+        self.provider = self.config.get('provider', 'openai')
         self.base_url = self.config.get('base_url', '').rstrip('/')
         self.model = self.config.get('model')
+        
+        if self.provider == 'gemini':
+            try:
+                import google.generativeai as genai
+                self.genai = genai
+                self.genai.configure(api_key=self.api_key) # type: ignore
+                self.genai_model = self.genai.GenerativeModel(self.model) # type: ignore
+            except ImportError:
+                print("❌ 错误: 未找到 google-generativeai 库。请运行 pip install google-generativeai")
+                sys.exit(1)
 
     def call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """调用 LLM API"""
+        if self.provider == 'gemini':
+            return self._call_gemini(system_prompt, user_prompt)
+        else:
+            return self._call_openai(system_prompt, user_prompt)
+
+    def _call_gemini(self, system_prompt: str, user_prompt: str) -> str:
+        try:
+            # Gemini SDK 建议将 system prompt 包含在 model配置中或直接拼接
+            # 这里采用拼接方式以支持动态 system prompt
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            response = self.genai_model.generate_content(full_prompt)
+            return response.text
+        except Exception as e:
+            raise RuntimeError(f"Gemini API 调用失败: {e}")
+
+    def _call_openai(self, system_prompt: str, user_prompt: str) -> str:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'

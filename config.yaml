@@ -1,9 +1,14 @@
 # LLM API配置
 llm:
-  base_url: "https://api.siliconflow.cn/v1"  # LLM API 地址
+  provider: "gemini" # 选项: "openai" (默认) 或 "gemini"
+  
+  # 通用配置
   api_key: ""  # 填入你的API Key, 或通过 --api-key 参数、LLM_API_KEY 环境变量提供
-  model: "MiniMaxAI/MiniMax-M2" # 使用的模型
-  max_chars: 15000  # 字幕分块处理的单块最大字符数，以避免超出模型上下文限制
+  model: "gemini-3-pro-preview" # 模型名称。Gemini 示例: "gemini-1.5-flash", "gemini-1.5-pro"
+  max_chars: 30000  # 字幕分块处理的单块最大字符数 (Gemini 模型通常支持更长上下文，可适当调大)
+
+  # OpenAI 兼容接口配置 (仅 provider 为 openai 时生效)
+  # base_url: "https://api.siliconflow.cn/v1"  # LLM API 地址
 
 # 提示词配置
 prompts:
