@@ -70,20 +70,23 @@ class SubtitleService:
     def __init__(self, config: Dict[str, Any]):
         self.config = config.get('subtitle', {})
 
-    def extract_subtitle(self, video_url: str) -> str:
+    def extract_subtitle(self, video_url: str, temp_dir: Path) -> str:
         """使用 yt-dlp 提取字幕"""
         temp_prefix = f"temp_sub_{int(time.time())}"
         preferred_languages = self.config.get('preferred_languages', ['en'])
         browser_for_cookies = self.config.get('browser_for_cookies')
         cookies_file = self.config.get('cookies_file')
         
+        # 构建完整的输出模板路径，将字幕文件保存到 temp_dir 中
+        output_template = str(temp_dir / temp_prefix)
+
         ydl_opts: Dict[str, Any] = {
             'skip_download': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
             'subtitleslangs': preferred_languages,
             'subtitlesformat': 'vtt',
-            'outtmpl': temp_prefix,
+            'outtmpl': output_template, # 使用完整的路径
             'quiet': True,
             'no_warnings': True,
             'no_check_certificate': True,
@@ -104,23 +107,24 @@ class SubtitleService:
                 ydl.extract_info(video_url, download=True)
                 
                 # 查找下载的文件
-                for file in os.listdir('.'):
+                downloaded_file_path = None
+                for file in os.listdir(temp_dir):
                     if file.startswith(temp_prefix) and file.endswith('.vtt'):
-                        downloaded_file = file
+                        downloaded_file_path = temp_dir / file
                         break
                 
-                if not downloaded_file:
+                if not downloaded_file_path:
                     raise ValueError("未找到可下载的字幕文件ảng")
 
-                with open(downloaded_file, 'r', encoding='utf-8') as f:
+                with open(downloaded_file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
                 return self._clean_vtt_text(content)
         except Exception as e:
             raise RuntimeError(f"字幕提取失败: {e}")
         finally:
-            if downloaded_file and os.path.exists(downloaded_file):
-                os.remove(downloaded_file)
+            if downloaded_file_path and os.path.exists(downloaded_file_path): # type: ignore
+                os.remove(downloaded_file_path)
 
     def _clean_vtt_text(self, vtt_text: str) -> str:
         """清洗 VTT 字幕格式"""
@@ -256,7 +260,7 @@ class YouTubeAnalyzer:
                 print("从缓存加载字幕...")
                 transcript = self.cache_manager.load_text(transcript_path)
             else:
-                transcript = self.subtitle_service.extract_subtitle(video_url)
+                transcript = self.subtitle_service.extract_subtitle(video_url, temp_dir)
                 self.cache_manager.save_text(transcript_path, transcript)
             
             print(f"字幕处理完成，长度: {len(transcript)} 字符ảng")
